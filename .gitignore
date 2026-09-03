@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite/
+.playwright-cli/
+.npm-cache/
+coverage/
+output/
+*.log

@@ -1,0 +1,287 @@
+:host {
+  --lla-accent: #fe2c55;
+  --lla-bg: rgba(18, 18, 20, 0.94);
+  --lla-text: #f7f7f8;
+  --lla-muted: #9d9da5;
+  all: initial;
+  position: fixed;
+  z-index: 2147483646;
+  right: 20px;
+  bottom: 22px;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+.lla-panel {
+  position: relative;
+  width: 244px;
+  overflow: visible;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: var(--lla-bg);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.35),
+    inset 0 1px rgba(255, 255, 255, 0.04);
+  color: var(--lla-text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  padding: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.lla-header {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.lla-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--lla-accent);
+  color: white;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lla-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lla-heading > strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lla-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--lla-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.lla-status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: #7b7b84;
+}
+
+.lla-status--ready i,
+.lla-status--simulation i {
+  background: #35d07f;
+  box-shadow: 0 0 0 3px rgba(53, 208, 127, 0.12);
+}
+
+.lla-status--active i {
+  background: var(--lla-accent);
+  box-shadow: 0 0 0 3px rgba(254, 44, 85, 0.16);
+  animation: lla-breathe 0.85s ease-in-out infinite alternate;
+}
+
+.lla-status--target_missing i {
+  background: #f4ae3d;
+}
+
+.lla-count {
+  display: flex;
+  min-width: 42px;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.lla-count strong {
+  max-width: 62px;
+  overflow: hidden;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.lla-count span {
+  margin-top: 3px;
+  color: var(--lla-muted);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lla-actions {
+  display: grid;
+  grid-template-columns: 53px 1fr;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.lla-actions button {
+  height: 46px;
+  border: 0;
+  border-radius: 11px;
+  color: white;
+  cursor: pointer;
+  outline: none;
+  transition:
+    transform 100ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lla-actions button:focus-visible {
+  box-shadow: 0 0 0 2px #121214, 0 0 0 4px white;
+}
+
+.lla-actions button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.lla-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.lla-once {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #323238;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.05;
+}
+
+.lla-once:hover:not(:disabled) {
+  background: #3d3d44;
+}
+
+.lla-once span {
+  margin-top: 3px;
+  color: #b9b9c0;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lla-hold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--lla-accent);
+  touch-action: none;
+}
+
+.lla-hold:hover:not(:disabled) {
+  background: #ec1e49;
+}
+
+.lla-hold-icon {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.lla-hold > span:last-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.lla-hold strong {
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.lla-hold small {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.lla-error,
+.lla-simulation,
+.lla-real {
+  margin: 8px 2px 0;
+  color: var(--lla-muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.lla-error {
+  color: #ffc56d;
+}
+
+.lla-pulse {
+  position: absolute;
+  right: 18px;
+  top: 58px;
+  color: var(--lla-accent);
+  font-size: 22px;
+  font-weight: 850;
+  pointer-events: none;
+  text-shadow: 0 3px 14px rgba(254, 44, 85, 0.45);
+  animation: lla-float 650ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes lla-float {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.85);
+  }
+  22% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-32px) scale(1.08);
+  }
+}
+
+@keyframes lla-breathe {
+  to {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lla-panel *,
+  .lla-panel *::before,
+  .lla-panel *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
