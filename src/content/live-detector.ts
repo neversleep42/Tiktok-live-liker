@@ -1,7 +1,10 @@
 import {
+  DOM_LIVE_KEY,
+  GENERIC_LIKE_TARGET_SELECTORS,
   LIKE_TARGET_SELECTORS,
   LIVE_CONTAINER_SELECTORS,
   LIVE_DOM_SELECTORS,
+  LIVE_LIKE_TARGET_SELECTORS,
   LIVE_PLAYER_SELECTORS,
   LIVE_RECHECK_DEBOUNCE_MS,
   URL_RECHECK_INTERVAL_MS,
@@ -17,6 +20,36 @@ export interface LiveSnapshot {
 }
 
 const LIVE_PATH_PATTERN = /^\/@([^/]+)\/live\/?$/i;
+
+// Zones à ne JAMAIS cliquer : avatars, profils, follows, invités, liens
+// vers un compte. En layout audio le LIVE n'est qu'une grille de tuiles ;
+// cliquer une tuile likerait la créatrice / l'invité au lieu du LIVE.
+export const EXCLUDED_LIKE_ANCESTORS = [
+  '[data-e2e*="avatar"]',
+  '[data-e2e*="follow"]',
+  '[data-e2e*="profile"]',
+  '[data-e2e*="guest"]',
+  '[data-e2e*="member"]',
+  '[data-e2e*="user"]',
+  '[data-e2e*="anchor"]',
+  '[data-e2e*="host"]',
+  'a[href^="/@"]',
+] as const;
+
+const EXCLUDED_SELECTOR = EXCLUDED_LIKE_ANCESTORS.join(", ");
+
+export function isExcludedTarget(element: Element): boolean {
+  try {
+    return (
+      (typeof element.matches === "function" &&
+        element.matches(EXCLUDED_SELECTOR)) ||
+      (typeof element.closest === "function" &&
+        element.closest(EXCLUDED_SELECTOR) !== null)
+    );
+  } catch {
+    return false;
+  }
+}
 const RELEVANT_SELECTOR = [
   ...LIVE_DOM_SELECTORS,
   ...LIKE_TARGET_SELECTORS,
@@ -61,11 +94,91 @@ export function findLiveScope(root: ParentNode = document): Element | null {
   return container ?? findUnique(LIVE_PLAYER_SELECTORS);
 }
 
+// Racine du LIVE comme cible de repli insensible au layout : le
+// double-clic remonte jusqu'au handler TikTok quelle que soit la
+// disposition (vidéo plein écran, audio + grille d'invités, etc.).
+export function resolveLiveRoomRoot(
+  root: ParentNode = document,
+): HTMLElement | null {
+  const scope = findLiveScope(root);
+  return scope instanceof HTMLElement && isVisibleElement(scope)
+    ? scope
+    : null;
+}
+
+// Cible réelle d'un like de LIVE sur PC : il n'y a PAS de bouton cœur
+// dédié sur TikTok web (double-clic sur la vidéo = 1 like). On vise donc
+// le player / la vidéo du LIVE, jamais un bouton générique qui likerait
+// la créatrice ou un commentaire.
+// la créatrice ou un commentaire.
+export function resolveLivePlayer(
+  root: ParentNode = document,
+): HTMLElement | null {
+  const scope = findLiveScope(root);
+  const searchRoots: ParentNode[] = scope ? [scope] : [root];
+  for (const searchRoot of searchRoots) {
+    const matches = searchRoot.querySelectorAll(
+      [...LIVE_PLAYER_SELECTORS, "video"].join(", "),
+    );
+    for (const match of matches) {
+      if (match instanceof HTMLElement && isVisibleElement(match)) {
+        return match;
+      }
+    }
+  }
+  return null;
+}
+
+// Visibilité sans test d'occlusion : la vidéo du LIVE est toujours
+// recouverte par l'interface TikTok (overlays), donc elementFromPoint ne
+// la retourne jamais. Le double-clic se dispatche directement sur elle.
+export function isVisibleElement(element: HTMLElement): boolean {
+  if (!element.isConnected) return false;
+  if (element.matches(":disabled, [aria-disabled='true'], [hidden]")) {
+    return false;
+  }
+  if (element.closest("[hidden], [inert], [aria-hidden='true']")) {
+    return false;
+  }
+
+  for (
+    let current: HTMLElement | null = element;
+    current;
+    current = current.parentElement
+  ) {
+    const style = window.getComputedStyle(current);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.pointerEvents === "none" ||
+      style.opacity === "0"
+    ) {
+      return false;
+    }
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  if (
+    rect.right <= 0 ||
+    rect.bottom <= 0 ||
+    rect.left >= window.innerWidth ||
+    rect.top >= window.innerHeight
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function toInteractiveElement(element: Element): HTMLElement | null {
+  // Jamais un avatar / profil / follow : likerait la personne, pas le LIVE.
+  if (isExcludedTarget(element)) return null;
   const interactive = element.matches("button, [role='button']")
     ? element
     : element.closest("button, [role='button']");
-  return interactive instanceof HTMLElement ? interactive : null;
+  if (!(interactive instanceof HTMLElement)) return null;
+  return isExcludedTarget(interactive) ? null : interactive;
 }
 
 export function isValidInteractionTarget(element: HTMLElement): boolean {
@@ -130,28 +243,45 @@ export function isValidInteractionTarget(element: HTMLElement): boolean {
 export function resolveLikeTarget(
   root: ParentNode = document,
 ): { target: HTMLElement | null; state: TargetState } {
-  const candidates = new Set<HTMLElement>();
-
-  const collect = (searchRoot: ParentNode, selectors: readonly string[]) => {
+  const collect = (
+    searchRoot: ParentNode,
+    selectors: readonly string[],
+  ): Set<HTMLElement> => {
+    const candidates = new Set<HTMLElement>();
     for (const match of searchRoot.querySelectorAll(selectors.join(", "))) {
       const candidate = toInteractiveElement(match);
       if (candidate && isValidInteractionTarget(candidate)) {
         candidates.add(candidate);
       }
     }
+    return candidates;
   };
 
   const liveScope = findLiveScope(root);
   if (!liveScope) return { target: null, state: "MISSING" };
-  collect(liveScope, LIKE_TARGET_SELECTORS);
 
-  if (candidates.size === 1) {
-    return { target: [...candidates][0], state: "READY" };
+  // Niveau 1 — bouton dédié au LIVE uniquement. C'est lui qui fait monter
+  // le compteur du LIVE affiché par TikTok. Les sélecteurs génériques
+  // (likes de commentaires, profil créatrice, etc.) sont ignorés ici pour
+  // ne jamais liker la créatrice à la place du LIVE.
+  const liveCandidates = collect(liveScope, LIVE_LIKE_TARGET_SELECTORS);
+  if (liveCandidates.size === 1) {
+    return { target: [...liveCandidates][0], state: "READY" };
+  }
+  if (liveCandidates.size > 1) {
+    return { target: null, state: "AMBIGUOUS" };
+  }
+
+  // Niveau 2 — repli générique : un seul candidat maximum, sinon on
+  // refuse (AMBIGUOUS) plutôt que de cliquer au hasard.
+  const genericCandidates = collect(liveScope, GENERIC_LIKE_TARGET_SELECTORS);
+  if (genericCandidates.size === 1) {
+    return { target: [...genericCandidates][0], state: "READY" };
   }
 
   return {
     target: null,
-    state: candidates.size > 1 ? "AMBIGUOUS" : "MISSING",
+    state: genericCandidates.size > 1 ? "AMBIGUOUS" : "MISSING",
   };
 }
 
@@ -159,8 +289,13 @@ export function readLiveSnapshot(
   url = window.location.href,
   root: ParentNode = document,
 ): LiveSnapshot {
-  const liveKey = getLiveKey(url);
-  if (!liveKey) {
+  const urlKey = getLiveKey(url);
+  const hasEvidence = hasLiveDomEvidence(root);
+
+  // PRD §7/18/30 : le DOM prime. L'URL /@pseudo/live reste un indice,
+  // mais un LIVE intégré (feed, overlay) avec preuve DOM est accepté
+  // sans exiger l'URL exacte.
+  if (!urlKey && !hasEvidence) {
     return {
       liveDetected: false,
       liveKey: null,
@@ -169,15 +304,16 @@ export function readLiveSnapshot(
     };
   }
 
-  if (!hasLiveDomEvidence(root)) {
+  if (urlKey && !hasEvidence) {
     return {
       liveDetected: false,
-      liveKey,
+      liveKey: urlKey,
       target: null,
       targetState: "MISSING",
     };
   }
 
+  const liveKey = urlKey ?? DOM_LIVE_KEY;
   const target = resolveLikeTarget(root);
   return {
     liveDetected: true,
@@ -201,7 +337,9 @@ export class LiveDetector {
   constructor(private readonly onChange: (snapshot: LiveSnapshot) => void) {}
 
   isLivePage(): boolean {
-    return isTikTokLiveUrl(window.location.href);
+    return (
+      isTikTokLiveUrl(window.location.href) || hasLiveDomEvidence(document)
+    );
   }
 
   start(): void {

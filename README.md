@@ -1,12 +1,45 @@
 # TikTok LIVE Like Assistant
 
-Extension Chrome Manifest V3 qui réduit la friction des interactions manuelles sur un TikTok LIVE. Elle fournit une touche à maintenir, un contrôle flottant, un compteur par session et un mode simulation sans action TikTok.
+Extension Chrome (Manifest V3) qui facilite l'envoi de likes pendant un
+TikTok LIVE regardé sur desktop : touche à maintenir, contrôle flottant,
+compteur de session et mode simulation sans action réelle.
 
-Le mode simulation est activé par défaut. Aucun backend, tracking, scraping ou appel à une API TikTok privée n’est utilisé.
+> ⚠️ **AVERTISSEMENT IMPORTANT — RISQUE DE BANNISSEMENT**
+>
+> TikTok peut considérer l'envoi automatisé ou assisté de likes comme une
+> violation de ses conditions d'utilisation. Utiliser cette extension
+> expose votre compte TikTok à des sanctions : limitation, suspension ou
+> **bannissement définitif**. En installant et en utilisant cette
+> extension, **vous acceptez ce risque et l'assumez entièrement**.
+> L'auteur décline toute responsabilité en cas de sanction appliquée à
+> votre compte.
 
-## Démarrage
+## Comment ça fonctionne
 
-Prérequis : une version récente de Node.js (20.19+, 22.12+ ou 24+) et Chrome/Chromium.
+1. **Détection du LIVE** : le content script vérifie que l'onglet est un
+   TikTok LIVE (URL `/@pseudo/live` et/ou preuve DOM `live-room` / player).
+   Si la détection auto échoue, le popup propose une **activation
+   manuelle** et un ciblage par **clic droit**.
+2. **Tu vises, l'extension clique** : elle suit ton curseur. Quand tu
+   maintiens la touche **L** (ou le bouton **Maintenir** du panneau
+   flottant), elle rejoue un **double-clic** là où tu vises dans le LIVE —
+   c'est le geste natif TikTok sur PC (il n'y a pas de bouton cœur sur
+   web). Les zones avatar / profil / follow sont **exclues** : on ne like
+   jamais la créatrice à la place du LIVE.
+3. **Insensible au layout** : vidéo plein écran comme grille audio
+   d'invités, la cible de repli est la racine du LIVE. Quand l'hôte change
+   la disposition, l'ancienne cible est oubliée automatiquement.
+4. **Arrêt immédiat** : relâchement de la touche/bouton, changement
+   d'onglet, page cachée, perte de focus, sortie du LIVE ou désactivation
+   → tout s'arrête aussitôt (contrôleur de visibilité + `MutationObserver`
+   sans polling agressif).
+5. **Compteur de session** : compte les envois **déclenchés**, pas les
+   likes confirmés par TikTok. Conservé en mémoire par onglet, remis à
+   zéro au changement de LIVE, rechargement ou réinitialisation manuelle.
+
+## Installation
+
+Prérequis : Node.js récent (20.19+, 22.12+ ou 24+) et Chrome/Chromium.
 
 ```bash
 npm install
@@ -14,94 +47,71 @@ npm test
 npm run build
 ```
 
-Pour charger l’extension :
+Charger l'extension :
 
 1. Ouvrir `chrome://extensions`.
-2. Activer **Mode développeur**.
-3. Cliquer sur **Charger l’extension non empaquetée**.
+2. Activer le **Mode développeur**.
+3. Cliquer **Charger l'extension non empaquetée**.
 4. Sélectionner le dossier `dist/` généré par le build.
 
-`npm run dev` lance Vite/CRXJS en mode développement. Après une modification, rechargez l’extension depuis `chrome://extensions` si Chrome ne la met pas à jour automatiquement.
+> Après chaque `npm run build` : bouton reload sur `chrome://extensions`,
+> puis **F5 obligatoire** sur chaque onglet TikTok déjà ouvert (sinon
+> erreur `Extension context invalidated`).
 
 ## Utilisation
 
-1. Ouvrir une URL de la forme `https://www.tiktok.com/@createur/live`.
-2. Vérifier le statut dans le popup de l’extension.
-3. En simulation, maintenir la touche **L** ou le bouton **Maintenir** dans le contrôle flottant. Le feedback `+1` et le compteur sont locaux.
-4. Relâcher la touche ou le bouton pour arrêter immédiatement.
+1. Ouvrir un LIVE : `https://www.tiktok.com/@createur/live`.
+2. Si le popup dit `Aucun LIVE détecté` : cliquer **Activer ici**, ou
+   **clic droit sur la zone du LIVE → ♥ Utiliser comme cible**
+   (jamais sur un avatar).
+3. Placer le curseur sur la **zone du LIVE** (pas sur une tuile invitée).
+4. **Simulation ON** (défaut) : maintenir **L** → `+1` locaux + compteur,
+   aucun like réel. **Simulation OFF** : mode réel, voir limites ci-dessous.
+5. Relâcher pour arrêter. Le panneau flottant se réduit via le chevron `˅`.
 
-Le bouton **+1 Like** déclenche une seule interaction. Le compteur correspond aux interactions simulées ou envoyées par l’extension, pas aux likes confirmés par TikTok. Il est conservé en mémoire pour l’onglet courant et remis à zéro lors d’un changement de LIVE, d’un rechargement ou d’une réinitialisation manuelle.
+Réglage **Puissance · cadence** (Doux / Équilibré / Intense) : intervalles
+150–1000 ms entre deux envois pendant le maintien. Cadence fixe choisie
+par l'utilisateur, sans imitation de comportement humain.
 
-Le maintien est interrompu si la touche ou le pointeur est relâché, si la page devient invisible, si la fenêtre perd le focus, si l’utilisateur quitte le LIVE, si la cible change ou disparaît, si le mode change, ou si l’extension est désactivée.
+## Limites actuelles (à lire avant usage)
 
-## Mode réel : limite importante
+- **Événements synthétiques** : l'extension rejoue des événements
+  `pointer/mouse/dblclick` avec `isTrusted === false`. TikTok peut les
+  **ignorer** ; aucun envoi n'est confirmé. Le compteur = envois
+  déclenchés, pas likes validés — un écart avec le compteur TikTok est
+  normal (déduplication / rate-limit côté serveur).
+- **Pas de bouton cœur sur PC** : le like passe par double-clic sur la
+  zone du LIVE. Viser un avatar like la personne, pas le LIVE — d'où
+  l'exclusion des avatars et la visée curseur.
+- **Le popup se ferme** dès qu'il perd le focus (limite Chrome) : suivre
+  le compteur sur le **panneau flottant** dans la page.
+- **Layouts changeants** : si l'hôte modifie la disposition, re-viser la
+  zone du LIVE ; la cible périmée est oubliée automatiquement.
+- **Pas de fonctionnement autonome** : pas de likes en arrière-plan, onglet
+  inactif ou sans maintien de l'utilisateur. Pas de contournement
+  anti-bot, pas d'API TikTok privée, pas de `chrome.debugger`, pas de
+  backend ni de collecte de données (voir `PRD — TikTok LIVE Like
+  Assistant Chrome Extension.md`, §5 et §38).
 
-Une extension MV3 avec des permissions minimales ne peut pas fabriquer un clic de souris approuvé par le navigateur. Le mode réel appelle uniquement `HTMLElement.click()` sur un contrôle visible et non ambigu ; cet événement est synthétique (`isTrusted === false`) et TikTok peut l’ignorer.
+## Vie privée
 
-Avant toute utilisation du maintien en mode réel, effectuer un test manuel d’une seule action :
-
-1. Rester sur un LIVE avec le contrôle de like TikTok visible.
-2. Désactiver la simulation dans le popup.
-3. Utiliser uniquement le bouton **+1 Like**.
-4. Vérifier directement dans l’interface TikTok que l’action est acceptée.
-
-Si TikTok refuse ce clic, le mode réel n’est pas compatible avec cette version de son interface. Le projet ne doit pas contourner cette limite avec `chrome.debugger`, des coordonnées automatisées, une API privée ou des techniques anti-détection.
-
-## Architecture
-
-```text
-src/
-├── background/       initialisation et mises à jour des réglages
-├── components/       contrôle flottant React
-├── content/          détection, interaction, visibilité et compteur
-├── popup/            statut et réglages de l’extension
-└── shared/           types, messages, constantes et stockage
-```
-
-- Le content script est injecté uniquement sur `https://www.tiktok.com/*`.
-- Le service worker reste sans état de session : Chrome peut le suspendre à tout moment.
-- Les réglages globaux `enabled` et `simulationMode` utilisent `chrome.storage.local`.
-- L’état du LIVE, la cible, le maintien et le compteur restent propres à chaque onglet.
-- Le contrôle flottant vit dans un Shadow DOM afin de ne pas modifier les styles de TikTok.
-- Un `MutationObserver` débouncé suit le DOM ; il ne déclenche jamais d’interaction.
-
-## Permissions et vie privée
-
-Le manifeste demande seulement :
-
-- `storage`, pour les deux réglages locaux ;
-- l’accès hôte à `https://www.tiktok.com/*`, pour le content script.
-
-L’extension ne collecte ni compte, cookie, message, follower, historique de navigation ou autre donnée personnelle. Rien n’est transmis à un serveur.
-
-## Adaptation aux changements TikTok
-
-Les sélecteurs DOM autorisés sont regroupés dans `src/shared/constants.ts`. La résolution échoue volontairement si aucune cible valide n’est trouvée ou si plusieurs candidats sont présents. Dans ce cas, le maintien s’arrête et l’interface affiche **Contrôle introuvable**.
-
-Pour prendre en charge un nouveau layout :
-
-1. Observer manuellement l’élément interactif visible sur un LIVE de test.
-2. Préférer un attribut `data-e2e` stable ou un nom accessible exact.
-3. Ajouter un fixture DOM anonymisé et son test avant le sélecteur.
-4. Vérifier qu’une page non-LIVE et un layout ambigu restent bloqués.
-
-Ne pas utiliser de classe générée, de coordonnées écran ou de recherche « premier bouton trouvé ».
-
-## Vérification manuelle MVP
-
-- Simulation : touche L, relâchement, bouton maintenu, bouton +1 et animation.
-- Sécurité : changement d’onglet, perte de focus et masquage de page arrêtent le compteur.
-- Navigation : LIVE → page TikTok, page TikTok → LIVE et LIVE A → LIVE B.
-- DOM : suppression ou remplacement du contrôle de like pendant le maintien.
-- Popup : activation, simulation, statuts, compteur et remise à zéro.
-- Multi-onglets : chaque LIVE conserve sa propre session en mémoire.
-- Mode réel : une seule action de faisabilité, jamais un scénario automatisé en production.
+Permissions minimales : `storage` (réglages locaux) et hôte
+`https://www.tiktok.com/*` (content script). `contextMenus` pour
+l'option « Utiliser comme cible ». Aucune donnée personnelle collectée,
+rien n'est envoyé à un serveur.
 
 ## Scripts
 
 ```text
-npm run dev       Vite/CRXJS en développement
-npm run build     vérification TypeScript + build dans dist/
-npm test          tests Vitest
+npm run dev         Vite/CRXJS en développement
+npm run build       vérification TypeScript + build dans dist/
+npm test            tests Vitest
 npm run test:watch
 ```
+
+## Licence
+
+Licence Propriétaire Source-Disponible v1.0 — voir [LICENSE](./LICENSE).
+Fork et modifications autorisés **à usage non commercial uniquement**,
+avec crédit obligatoire à **neversleep42** et lien vers le dépôt
+d'origine : https://github.com/neversleep42/Tiktok-live-liker.

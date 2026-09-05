@@ -1,6 +1,7 @@
 export interface ExtensionSettings {
   enabled: boolean;
   simulationMode: boolean;
+  holdIntervalMs: number;
 }
 
 export interface SessionState {
@@ -27,6 +28,7 @@ export interface RuntimeStatus {
   interactionCount: number;
   status: UiStatus;
   error: InteractionError | null;
+  manualLive?: boolean;
 }
 
 export type ExtensionMessage =
@@ -34,6 +36,9 @@ export type ExtensionMessage =
   | { type: "SET_SETTINGS"; patch: Partial<ExtensionSettings> }
   | { type: "GET_STATUS" }
   | { type: "RESET_SESSION" }
+  | { type: "FORCE_LIVE" }
+  | { type: "USE_CONTEXT_TARGET" }
+  | { type: "CLEAR_MANUAL" }
   | { type: "STATUS_CHANGED"; status: RuntimeStatus };
 
 export type ExtensionResponse =

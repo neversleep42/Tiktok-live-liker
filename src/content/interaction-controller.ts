@@ -1,6 +1,6 @@
-import { HOLD_INTERVAL_MS } from "../shared/constants";
+import { HOLD_INTERVAL_MS, LIVE_PLAYER_SELECTORS } from "../shared/constants";
 import type { InteractionError } from "../shared/types";
-import { isValidInteractionTarget } from "./live-detector";
+import { isValidInteractionTarget, isVisibleElement } from "./live-detector";
 
 export type InteractionResult = "simulated" | "dispatched";
 
@@ -25,8 +25,14 @@ export class InteractionController {
 
   constructor(
     private readonly environment: InteractionEnvironment,
-    private readonly intervalMs = HOLD_INTERVAL_MS,
+    private intervalMs = HOLD_INTERVAL_MS,
   ) {}
+
+  setIntervalMs(nextMs: number): void {
+    if (Number.isFinite(nextMs) && nextMs > 0) {
+      this.intervalMs = Math.round(nextMs);
+    }
+  }
 
   get isInteracting(): boolean {
     return this.active;
@@ -97,17 +103,30 @@ export class InteractionController {
       return false;
     }
 
-    const target = this.environment.getTarget();
-    if (!target || !isValidInteractionTarget(target)) {
-      this.environment.onError("INTERACTION_TARGET_NOT_FOUND");
-      return false;
-    }
-
+    // Simulation (PRD §14-15) : feedback local + compteur, sans action
+    // TikTok réelle. La cible DOM n'est pas exigée pour que le compteur
+    // fonctionne même quand TikTok change son interface.
     if (this.environment.isSimulationMode()) {
       this.environment.executeSimulation();
       this.environment.onError(null);
       this.environment.onInteraction("simulated");
       return true;
+    }
+
+    const target = this.environment.getTarget();
+    // La vidéo du LIVE est toujours occluse par l'interface TikTok :
+    // on la valide sans test d'occlusion, le double-clic part dessus.
+    const isLivePlayer =
+      target instanceof HTMLVideoElement ||
+      (target instanceof HTMLElement &&
+        target.matches(LIVE_PLAYER_SELECTORS.join(", ")));
+    const targetOk =
+      !!target &&
+      (isValidInteractionTarget(target) ||
+        (isLivePlayer && isVisibleElement(target)));
+    if (!target || !targetOk) {
+      this.environment.onError("INTERACTION_TARGET_NOT_FOUND");
+      return false;
     }
 
     this.environment.executeReal(target);

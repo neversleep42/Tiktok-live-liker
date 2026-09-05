@@ -4,12 +4,16 @@ export const STORAGE_KEYS = {
   settings: "settings",
 } as const;
 
+export const HOLD_INTERVAL_MS = 350;
+export const MIN_HOLD_INTERVAL_MS = 150;
+export const MAX_HOLD_INTERVAL_MS = 1000;
+export const DOM_LIVE_KEY = "dom-live";
+
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   enabled: true,
   simulationMode: true,
+  holdIntervalMs: HOLD_INTERVAL_MS,
 };
-
-export const HOLD_INTERVAL_MS = 350;
 export const LIVE_RECHECK_DEBOUNCE_MS = 120;
 export const URL_RECHECK_INTERVAL_MS = 1_000;
 export const SHORTCUT_CODE = "KeyL";

@@ -79,7 +79,6 @@ describe("InteractionController", () => {
 
     expect(controller.trigger()).toBe(true);
     expect(fixture.executeSimulation).toHaveBeenCalledOnce();
-    expect(fixture.getTarget).toHaveBeenCalledOnce();
     expect(fixture.executeReal).not.toHaveBeenCalled();
     expect(fixture.onInteraction).toHaveBeenCalledWith("simulated");
     expect(fixture.onError).toHaveBeenCalledWith(null);
@@ -166,16 +165,15 @@ describe("InteractionController", () => {
     );
   });
 
-  it("requires a valid target in simulation without dispatching it", () => {
+  it("runs simulation without requiring a real target", () => {
     const fixture = createEnvironment({ simulation: true, target: null });
     const controller = new InteractionController(fixture.environment, 100);
 
-    expect(controller.trigger()).toBe(false);
-    expect(fixture.executeSimulation).not.toHaveBeenCalled();
+    expect(controller.trigger()).toBe(true);
+    expect(fixture.executeSimulation).toHaveBeenCalledOnce();
     expect(fixture.executeReal).not.toHaveBeenCalled();
-    expect(fixture.onError).toHaveBeenCalledWith(
-      "INTERACTION_TARGET_NOT_FOUND",
-    );
+    expect(fixture.onInteraction).toHaveBeenCalledWith("simulated");
+    expect(fixture.onError).toHaveBeenCalledWith(null);
   });
 
   it("stops a real hold if its target disappears between attempts", () => {

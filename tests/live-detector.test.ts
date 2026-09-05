@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   getLiveKey,
+  isExcludedTarget,
   isTikTokLiveUrl,
   isValidInteractionTarget,
+  isVisibleElement,
   readLiveSnapshot,
   resolveLikeTarget,
+  resolveLivePlayer,
+  resolveLiveRoomRoot,
 } from "../src/content/live-detector";
 
 describe("TikTok LIVE URL resolution", () => {
@@ -74,7 +78,7 @@ describe("like target resolution", () => {
     expect(resolveLikeTarget().state).toBe("READY");
   });
 
-  it("fails closed when more than one valid target is present", () => {
+  it("prefers the dedicated LIVE button over a generic like control", () => {
     document.body.innerHTML = `
       <main data-e2e="live-room">
         <button data-e2e="live-like-button"></button>
@@ -82,9 +86,38 @@ describe("like target resolution", () => {
       </main>
     `;
 
+    // Le bouton du LIVE gagne : on ne like jamais la créatrice ou un
+    // commentaire à la place du LIVE.
+    expect(resolveLikeTarget()).toEqual({
+      target: document.querySelector('[data-e2e="live-like-button"]'),
+      state: "READY",
+    });
+  });
+
+  it("fails closed when more than one dedicated LIVE target is present", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room">
+        <button data-e2e="live-like-button"></button>
+        <button data-e2e="live-room-like"></button>
+      </main>
+    `;
+
     expect(resolveLikeTarget()).toEqual({
       target: null,
       state: "AMBIGUOUS",
+    });
+  });
+
+  it("falls back to a single generic control only without a LIVE button", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room">
+        <button aria-label="Like"></button>
+      </main>
+    `;
+
+    expect(resolveLikeTarget()).toEqual({
+      target: document.querySelector('button[aria-label="Like"]'),
+      state: "READY",
     });
   });
 
@@ -113,6 +146,70 @@ describe("like target resolution", () => {
     button.remove();
 
     expect(isValidInteractionTarget(button)).toBe(false);
+  });
+
+  it("resolves the LIVE video as real target without occlusion check", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room">
+        <div data-e2e="live-room-player"><video data-e2e="live-video"></video></div>
+      </main>
+    `;
+    const video = document.querySelector("video") as HTMLElement;
+    // jsdom ne fait pas de layout : on simule un rect visible.
+    video.getBoundingClientRect = () =>
+      ({
+        width: 320,
+        height: 568,
+        top: 0,
+        left: 0,
+        right: 320,
+        bottom: 568,
+      }) as DOMRect;
+
+    expect(isVisibleElement(video)).toBe(true);
+    expect(resolveLivePlayer()).toBe(video);
+  });
+
+  it("rejects a hidden LIVE video", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room">
+        <video data-e2e="live-video" style="display:none"></video>
+      </main>
+    `;
+
+    expect(resolveLivePlayer()).toBeNull();
+  });
+
+  it("never targets avatars, profiles or follow buttons", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room">
+        <button data-e2e="live-avatar"><img alt="créatrice" /></button>
+        <a href="/@creator"><span>Profil</span></a>
+      </main>
+    `;
+
+    expect(resolveLikeTarget()).toEqual({ target: null, state: "MISSING" });
+    expect(
+      isExcludedTarget(document.querySelector("button") as Element),
+    ).toBe(true);
+  });
+
+  it("falls back to the LIVE room root whatever the layout", () => {
+    document.body.innerHTML = `
+      <main data-e2e="live-room"><div>grille audio d'invités</div></main>
+    `;
+    const root = document.querySelector("main") as HTMLElement;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        top: 0,
+        left: 0,
+        right: 800,
+        bottom: 600,
+      }) as DOMRect;
+
+    expect(resolveLiveRoomRoot()).toBe(root);
   });
 
   it("rejects a target hidden by an ancestor", () => {
@@ -203,11 +300,11 @@ describe("live snapshots", () => {
     });
   });
 
-  it("distinguishes a detected LIVE whose target is ambiguous", () => {
+  it("distinguishes a detected LIVE whose dedicated buttons are ambiguous", () => {
     document.body.innerHTML = `
       <main data-e2e="live-room">
         <button data-e2e="live-like-button"></button>
-        <button aria-label="Like"></button>
+        <button data-e2e="live-room-like"></button>
       </main>
     `;
 

@@ -16,7 +16,7 @@ const manifest: ManifestV3Export = {
     service_worker: "src/background/service-worker.ts",
     type: "module",
   },
-  permissions: ["storage"],
+  permissions: ["storage", "contextMenus"],
   host_permissions: ["https://www.tiktok.com/*"],
   content_scripts: [
     {
