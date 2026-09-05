@@ -6,3 +6,8 @@ dist/
 coverage/
 output/
 *.log
+
+# Landing maintained locally, outside the extension repository.
+/landing-page/
+/tests/landing-marketing.test.ts
+/tik1.webp
