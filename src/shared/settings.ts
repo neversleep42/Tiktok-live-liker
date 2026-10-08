@@ -14,6 +14,7 @@ export function normalizeSettings(value: unknown): ExtensionSettings {
   const candidate = value as Partial<ExtensionSettings>;
 
   return {
+    interactionMode: candidate.interactionMode === "automatic" ? "automatic" : "manual",
     enabled:
       typeof candidate.enabled === "boolean"
         ? candidate.enabled

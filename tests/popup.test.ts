@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Popup } from "../src/popup/Popup";
+import { DEFAULT_SETTINGS } from "../src/shared/constants";
 import type {
   ExtensionMessage,
   ExtensionResponse,
@@ -48,7 +49,10 @@ function installChromeMock(initialStatus: RuntimeStatus) {
       sendMessage: sendTabMessage,
     },
     runtime: {
-      sendMessage: vi.fn(async (): Promise<ExtensionResponse> => ({ ok: true })),
+      sendMessage: vi.fn(async (message: ExtensionMessage): Promise<ExtensionResponse> =>
+        message.type === "SET_SETTINGS"
+          ? { ok: true, settings: { ...DEFAULT_SETTINGS, ...message.patch } }
+          : { ok: true }),
       onMessage: {
         addListener: vi.fn((listener: RuntimeMessageListener) => {
           runtimeListeners.add(listener);
@@ -195,5 +199,33 @@ describe("Popup event synchronization", () => {
       }
     });
     expect(checkboxes().map((input) => input.checked)).toEqual([false, false]);
+  });
+
+  it("saves automatic mode and shows start/stop instructions", async () => {
+    const automatic = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Automatique")!;
+    await act(async () => {
+      automatic.click();
+      await flushAsyncWork();
+    });
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_SETTINGS", patch: { interactionMode: "automatic" },
+    });
+    expect(automatic.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".foot")?.textContent).toContain("Marche / arrêt");
+    expect(container.querySelector(".status-text p")?.textContent).toContain("Démarrer / Arrêter");
+  });
+
+  it("saves the 10 per second rapid preset", async () => {
+    const rapid = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Rapide")!;
+    await act(async () => {
+      rapid.click();
+      await flushAsyncWork();
+    });
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "SET_SETTINGS", patch: { holdIntervalMs: 100 },
+    });
+    expect(container.querySelector(".cadence-value")?.textContent).toBe("10/s");
   });
 });

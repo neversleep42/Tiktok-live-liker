@@ -1,4 +1,7 @@
+export type InteractionMode = "manual" | "automatic";
+
 export interface ExtensionSettings {
+  interactionMode: InteractionMode;
   enabled: boolean;
   simulationMode: boolean;
   holdIntervalMs: number;
@@ -18,7 +21,9 @@ export type UiStatus =
   | "ACTIVE"
   | "SIMULATION";
 
-export type InteractionError = "INTERACTION_TARGET_NOT_FOUND";
+export type InteractionError =
+  | "INTERACTION_TARGET_NOT_FOUND"
+  | "INTERACTION_DISPATCH_FAILED";
 
 export interface RuntimeStatus {
   enabled: boolean;
@@ -39,6 +44,13 @@ export type ExtensionMessage =
   | { type: "FORCE_LIVE" }
   | { type: "USE_CONTEXT_TARGET" }
   | { type: "CLEAR_MANUAL" }
+  | {
+      type: "DISPATCH_TRUSTED_LIKE";
+      x: number;
+      y: number;
+      doubleClick: boolean;
+    }
+  | { type: "RELEASE_TRUSTED_INPUT" }
   | { type: "STATUS_CHANGED"; status: RuntimeStatus };
 
 export type ExtensionResponse =

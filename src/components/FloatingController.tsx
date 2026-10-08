@@ -1,7 +1,10 @@
 import type {
+  InteractionMode,
   InteractionError,
   UiStatus,
 } from "../shared/types";
+import { CADENCE_PRESETS } from "../shared/constants";
+import { version } from "../../package.json";
 
 interface FloatingControllerProps {
   status: UiStatus;
@@ -10,9 +13,15 @@ interface FloatingControllerProps {
   error: InteractionError | null;
   pulseId: number;
   collapsed: boolean;
+  interactionMode: InteractionMode;
+  intervalMs: number;
+  onModeChange: (mode: InteractionMode) => void;
+  onIntervalChange: (ms: number) => void;
+  onToggleAutomatic: () => void;
+  onSimulationChange: (simulation: boolean) => void;
   onToggleCollapse: () => void;
   onTrigger: () => void;
-  onHoldStart: (source: "pointer" | "keyboard") => void;
+  onHoldStart: (source: "pointer" | "keyboard", pointerId?: number) => void;
   onHoldStop: (source: "pointer" | "keyboard") => void;
 }
 
@@ -32,11 +41,18 @@ export function FloatingController({
   error,
   pulseId,
   collapsed,
+  interactionMode,
+  intervalMs,
+  onModeChange,
+  onIntervalChange,
+  onToggleAutomatic,
+  onSimulationChange,
   onToggleCollapse,
   onTrigger,
   onHoldStart,
   onHoldStop,
 }: FloatingControllerProps) {
+  const automatic = interactionMode === "automatic";
   const canInteract =
     status === "READY" || status === "ACTIVE" || status === "SIMULATION";
 
@@ -64,6 +80,11 @@ export function FloatingController({
             </svg>
           </span>
         </button>
+        {automatic && status === "ACTIVE" ? (
+          <button type="button" className="lla-stop" onClick={(event) => {
+            if (event.nativeEvent.isTrusted) onToggleAutomatic();
+          }}>Arrêter</button>
+        ) : null}
       </section>
     );
   }
@@ -80,15 +101,15 @@ export function FloatingController({
           </svg>
         </span>
         <div className="lla-heading">
-          <strong>LIVE Like</strong>
+          <strong>LIVE Like · {version}</strong>
           <span className={`lla-status lla-status--${status.toLowerCase()}`}>
             <i aria-hidden="true" />
             {STATUS_LABELS[status]}
           </span>
         </div>
-        <div className="lla-count" aria-label={`${count} interactions envoyées`}>
+        <div className="lla-count" aria-label={`${count} ${simulationMode ? "simulations" : "tentatives non confirmées"}`}>
           <strong>{count.toLocaleString("fr-FR")}</strong>
-          <span>session</span>
+          <span>{simulationMode ? "simulation" : "tentatives"}</span>
         </div>
         <button
           type="button"
@@ -105,11 +126,28 @@ export function FloatingController({
         </button>
       </header>
 
+      <div className="lla-options" role="group" aria-label="Mode de likes">
+        {(["manual", "automatic"] as const).map((mode) => (
+          <button key={mode} type="button" aria-pressed={interactionMode === mode}
+            onClick={(event) => { if (event.nativeEvent.isTrusted) onModeChange(mode); }}>
+            {mode === "manual" ? "Manuel" : "Automatique"}
+          </button>
+        ))}
+      </div>
+      <label className="lla-cadence">
+        <span>Cadence · {(1000 / intervalMs).toLocaleString("fr-FR", { maximumFractionDigits: 1 })}/s</span>
+        <select aria-label="Cadence d’envoi" value={intervalMs}
+          onChange={(event) => { if (event.nativeEvent.isTrusted) onIntervalChange(Number(event.currentTarget.value)); }}>
+          {!CADENCE_PRESETS.some((preset) => preset.ms === intervalMs) ? <option value={intervalMs}>Personnalisée</option> : null}
+          {CADENCE_PRESETS.map((preset) => <option key={preset.ms} value={preset.ms}>{preset.label}</option>)}
+        </select>
+      </label>
+
       <div className="lla-actions">
         <button
           className="lla-once"
           type="button"
-          disabled={!canInteract}
+          disabled={!canInteract || status === "ACTIVE"}
           title="Envoyer une seule interaction"
           onClick={(event) => {
             if (event.nativeEvent.isTrusted) onTrigger();
@@ -122,16 +160,20 @@ export function FloatingController({
           className="lla-hold"
           type="button"
           disabled={!canInteract}
-          title="Maintenir pour envoyer en continu"
-          onPointerDown={(event) => {
-            if (!event.nativeEvent.isTrusted || event.button !== 0) return;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            onHoldStart("pointer");
+          title={automatic ? "Démarrer ou arrêter les likes automatiques" : "Maintenir pour envoyer en continu"}
+          aria-pressed={status === "ACTIVE"}
+          onClick={(event) => {
+            if (automatic && event.nativeEvent.isTrusted) onToggleAutomatic();
           }}
-          onPointerUp={() => onHoldStop("pointer")}
-          onPointerCancel={() => onHoldStop("pointer")}
-          onLostPointerCapture={() => onHoldStop("pointer")}
+          onPointerDown={(event) => {
+            if (automatic) return;
+            if (!event.nativeEvent.isTrusted || event.button !== 0) return;
+            // The content script observes release globally for this pointer.
+            // Browser-generated clicks can steal capture from this control.
+            onHoldStart("pointer", event.pointerId);
+          }}
           onKeyDown={(event) => {
+            if (automatic) return;
             if (
               !event.nativeEvent.isTrusted ||
               event.repeat ||
@@ -143,6 +185,7 @@ export function FloatingController({
             onHoldStart("keyboard");
           }}
           onKeyUp={(event) => {
+            if (automatic) return;
             if (event.code === "Space" || event.code === "Enter") {
               event.preventDefault();
               onHoldStop("keyboard");
@@ -157,21 +200,32 @@ export function FloatingController({
             </svg>
           </span>
           <span className="lla-hold-text">
-            <strong>Maintenir</strong>
-            <small>vise la vidéo + L</small>
+            <strong>{automatic ? (status === "ACTIVE" ? "Arrêter" : "Démarrer") : "Maintenir"}</strong>
+            <small>{automatic ? "L : marche / arrêt" : "vise la vidéo + L"}</small>
           </span>
           <kbd aria-hidden="true">L</kbd>
         </button>
       </div>
+      <p className="lla-simulation">{automatic ? "Sans maintien · Échap pour arrêter" : "Relâche L ou le bouton pour arrêter"}</p>
 
       {error === "INTERACTION_TARGET_NOT_FOUND" ? (
         <p className="lla-error" role="status">
-          Le contrôle TikTok n’est pas disponible.
+          Cible introuvable. Clic droit sur la zone qui réagit à tes likes → Utiliser comme cible.
+        </p>
+      ) : null}
+      {error === "INTERACTION_DISPATCH_FAILED" ? (
+        <p className="lla-error" role="status">
+          Envoi navigateur impossible. Ferme les DevTools, puis recharge l’extension et la page TikTok.
         </p>
       ) : null}
 
       {simulationMode ? (
-        <p className="lla-simulation">Simulation locale · aucun like réel</p>
+        <div className="lla-simulation-notice">
+          <p className="lla-simulation">Simulation active : aucun like n’est envoyé.</p>
+          <button type="button" className="lla-enable-real" onClick={(event) => {
+            if (event.nativeEvent.isTrusted) onSimulationChange(false);
+          }}>Activer les likes réels</button>
+        </div>
       ) : (
         <p className="lla-real">Mode réel · envois non confirmés par TikTok</p>
       )}

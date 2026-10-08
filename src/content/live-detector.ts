@@ -51,6 +51,7 @@ export function isExcludedTarget(element: Element): boolean {
   }
 }
 const RELEVANT_SELECTOR = [
+  "video",
   ...LIVE_DOM_SELECTORS,
   ...LIKE_TARGET_SELECTORS,
 ].join(", ");
@@ -94,9 +95,8 @@ export function findLiveScope(root: ParentNode = document): Element | null {
   return container ?? findUnique(LIVE_PLAYER_SELECTORS);
 }
 
-// Racine du LIVE comme cible de repli insensible au layout : le
-// double-clic remonte jusqu'au handler TikTok quelle que soit la
-// disposition (vidéo plein écran, audio + grille d'invités, etc.).
+// Racine du LIVE pour délimiter la zone de recherche, pas pour envoyer
+// un clic : un événement sur ce parent n'atteint pas les contrôles enfants.
 export function resolveLiveRoomRoot(
   root: ParentNode = document,
 ): HTMLElement | null {
@@ -106,20 +106,20 @@ export function resolveLiveRoomRoot(
     : null;
 }
 
-// Cible réelle d'un like de LIVE sur PC : il n'y a PAS de bouton cœur
-// dédié sur TikTok web (double-clic sur la vidéo = 1 like). On vise donc
-// le player / la vidéo du LIVE, jamais un bouton générique qui likerait
-// la créatrice ou un commentaire.
-// la créatrice ou un commentaire.
+// Chercher la vidéo avant son conteneur : les événements remontent vers
+// les parents, mais ne descendent pas vers un lecteur enfant.
 export function resolveLivePlayer(
   root: ParentNode = document,
 ): HTMLElement | null {
   const scope = findLiveScope(root);
   const searchRoots: ParentNode[] = scope ? [scope] : [root];
   for (const searchRoot of searchRoots) {
-    const matches = searchRoot.querySelectorAll(
-      [...LIVE_PLAYER_SELECTORS, "video"].join(", "),
-    );
+    const matches = [
+      ...(searchRoot instanceof HTMLVideoElement ? [searchRoot] : []),
+      ...searchRoot.querySelectorAll("video"),
+      ...(searchRoot instanceof HTMLElement && searchRoot.matches(LIVE_PLAYER_SELECTORS.join(", ")) ? [searchRoot] : []),
+      ...searchRoot.querySelectorAll(LIVE_PLAYER_SELECTORS.join(", ")),
+    ];
     for (const match of matches) {
       if (match instanceof HTMLElement && isVisibleElement(match)) {
         return match;
@@ -174,6 +174,12 @@ export function isVisibleElement(element: HTMLElement): boolean {
 function toInteractiveElement(element: Element): HTMLElement | null {
   // Jamais un avatar / profil / follow : likerait la personne, pas le LIVE.
   if (isExcludedTarget(element)) return null;
+  if (
+    element instanceof HTMLElement &&
+    element.matches(LIVE_LIKE_TARGET_SELECTORS.join(", "))
+  ) {
+    return element;
+  }
   const interactive = element.matches("button, [role='button']")
     ? element
     : element.closest("button, [role='button']");
@@ -315,11 +321,12 @@ export function readLiveSnapshot(
 
   const liveKey = urlKey ?? DOM_LIVE_KEY;
   const target = resolveLikeTarget(root);
+  const player = target.state === "MISSING" ? resolveLivePlayer(root) : null;
   return {
     liveDetected: true,
     liveKey,
-    target: target.target,
-    targetState: target.state,
+    target: target.target ?? player,
+    targetState: player ? "READY" : target.state,
   };
 }
 

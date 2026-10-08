@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { version } from "../../package.json";
 
 import {
+  CADENCE_PRESETS,
   DEFAULT_SETTINGS,
   MAX_HOLD_INTERVAL_MS,
   MIN_HOLD_INTERVAL_MS,
@@ -51,12 +53,6 @@ const STATUS_COPY: Record<UiStatus, { title: string; detail: string }> = {
     detail: "Les interactions restent entièrement locales.",
   },
 };
-
-const CADENCE_PRESETS = [
-  { label: "Doux", ms: 700 },
-  { label: "Équilibré", ms: 350 },
-  { label: "Intense", ms: 180 },
-] as const;
 
 function intervalToPerSec(ms: number): string {
   return (1000 / ms).toLocaleString("fr-FR", { maximumFractionDigits: 1 });
@@ -219,7 +215,7 @@ export function Popup() {
       setNotice(
         type === "FORCE_LIVE"
           ? "LIVE activé manuellement sur cet onglet."
-          : "Mode manuel effacé.",
+          : "Activation forcée effacée.",
       );
     } catch {
       setNotice("Recharge l’onglet TikTok (F5), puis réessaie.");
@@ -237,6 +233,10 @@ export function Popup() {
     [settings.holdIntervalMs],
   );
   const isLive = status.liveDetected && status.status !== "NO_LIVE";
+  const automatic = settings.interactionMode === "automatic";
+  const statusDetail = automatic && (status.status === "READY" || status.status === "ACTIVE" || status.status === "SIMULATION")
+    ? "Dans le LIVE : Démarrer / Arrêter ou L. Échap arrête les envois."
+    : copy.detail;
 
   return (
     <main className={loading ? "popup popup--loading" : "popup"}>
@@ -257,7 +257,7 @@ export function Popup() {
             <i aria-hidden="true" />
             {isLive ? "LIVE" : "Veille"}
           </span>
-          <span className="version">v0.1</span>
+          <span className="version">v{version}</span>
         </div>
       </header>
 
@@ -267,7 +267,7 @@ export function Popup() {
         </div>
         <div className="status-text">
           <strong>{loading ? "Vérification…" : copy.title}</strong>
-          <p>{loading ? "Lecture de l’onglet actif." : copy.detail}</p>
+          <p>{loading ? "Lecture de l’onglet actif." : statusDetail}</p>
         </div>
         {status.interacting ? <span className="pulse" aria-hidden="true" /> : null}
       </section>
@@ -279,10 +279,9 @@ export function Popup() {
             {status.manualLive ? <span className="pill pill--live"><i aria-hidden="true" />Manuel</span> : null}
           </div>
           <p className="hint">
-            Méthode fiable : place ton curseur sur le cœur du LIVE qui fait monter
-            son compteur, puis maintiens <strong>L</strong>. L’extension clique là où
-            tu vises. Sinon : <strong>Activer</strong>, puis clic droit sur le bouton
-            like → <strong>♥ Utiliser comme cible</strong>.
+            Active le panneau ici, puis fais un clic droit sur la zone ou le bouton
+            qui réagit à tes likes → <strong>♥ Utiliser comme cible</strong>.
+            Vérifie que le mode simulation est désactivé pour tenter un envoi réel.
           </p>
           <div className="manual-actions">
             <button type="button" className="preset preset--active" onClick={() => void sendTabMessage("FORCE_LIVE")}>
@@ -294,20 +293,20 @@ export function Popup() {
           </div>
         </section>
       ) : status.manualLive ? (
-        <section className="manual manual--on" aria-label="Mode manuel actif">
+        <section className="manual manual--on" aria-label="Activation forcée du LIVE">
           <div className="manual-head">
-            <span className="eyebrow">Mode manuel actif</span>
+            <span className="eyebrow">Activation forcée du LIVE</span>
             <button type="button" className="ghost-btn" onClick={() => void sendTabMessage("CLEAR_MANUAL")}>
               Effacer
             </button>
           </div>
-          <p className="hint">Clic droit sur un autre bouton like pour changer de cible.</p>
+          <p className="hint">Clic droit sur une autre zone ou un bouton like pour changer de cible.</p>
         </section>
       ) : null}
 
       <section className="counter" aria-label="Compteur de session">
         <div className="counter-head">
-          <span className="eyebrow">Session · interactions</span>
+          <span className="eyebrow">{settings.simulationMode ? "Session · simulations" : "Session · tentatives"}</span>
           <button
             type="button"
             className="ghost-btn"
@@ -323,8 +322,26 @@ export function Popup() {
         </div>
         <strong>{formattedCount}</strong>
         <span className="counter-sub">
-          {settings.simulationMode ? "Simulation locale · aucun like réel" : "Mode réel · clic sur l’interface TikTok visible"}
+          {settings.simulationMode ? "Simulation locale · aucun like réel" : "Tentatives d’envoi · validation TikTok non confirmée"}
         </span>
+      </section>
+
+      <section className="cadence" aria-label="Mode de likes">
+        <div className="cadence-head"><span className="eyebrow">Mode de likes</span></div>
+        <div className="presets" role="group" aria-label="Choisir le mode">
+          {(["manual", "automatic"] as const).map((mode) => (
+            <button key={mode} type="button"
+              className={settings.interactionMode === mode ? "preset preset--active" : "preset"}
+              aria-pressed={settings.interactionMode === mode}
+              disabled={loading || saving || !settings.enabled}
+              onClick={() => void setSetting({ interactionMode: mode })}>
+              {mode === "manual" ? "Manuel" : "Automatique"}
+            </button>
+          ))}
+        </div>
+        <p className="hint">{automatic
+          ? "Sur le panneau du LIVE, clique Démarrer : les likes continuent sans maintien. Arrêter ou Échap les coupe."
+          : "Maintiens L ou le bouton du panneau pour envoyer des likes. Relâche pour arrêter."}</p>
       </section>
 
       <section className="cadence" aria-label="Puissance et cadence">
@@ -340,7 +357,7 @@ export function Popup() {
           step={10}
           value={MAX_HOLD_INTERVAL_MS + MIN_HOLD_INTERVAL_MS - settings.holdIntervalMs}
           disabled={saving || !settings.enabled}
-          aria-label="Cadence d’envoi pendant le maintien"
+          aria-label="Cadence d’envoi"
           style={
             {
               "--fill": `${(
@@ -358,7 +375,7 @@ export function Popup() {
         />
         <div className="presets" role="group" aria-label="Préréglages de puissance">
           {CADENCE_PRESETS.map((preset) => {
-            const active = Math.abs(preset.ms - settings.holdIntervalMs) < 30;
+            const active = preset.ms === settings.holdIntervalMs;
             return (
               <button
                 key={preset.label}
@@ -372,7 +389,7 @@ export function Popup() {
             );
           })}
         </div>
-        <p className="hint">Appliquée uniquement tant que tu maintiens L ou le bouton. Relâcher arrête tout.</p>
+        <p className="hint">Jusqu’à 10 tentatives/s selon le navigateur. Les envois s’arrêtent si le LIVE perd le focus.</p>
       </section>
 
       <section className="settings" aria-label="Réglages">
@@ -425,7 +442,7 @@ export function Popup() {
 
       {!settings.simulationMode && settings.enabled ? (
         <p className="real-mode-note" role="note">
-          Mode réel expérimental : déclenche uniquement le bouton visible de TikTok. TikTok peut ignorer ce clic synthétique.
+          Mode réel expérimental : clic sur le bouton sélectionné ou double-clic sur la zone vidéo. Le compteur indique les tentatives ; TikTok peut ignorer ces événements.
         </p>
       ) : null}
 
@@ -433,7 +450,7 @@ export function Popup() {
 
       <footer className="foot">
         <kbd>L</kbd>
-        <span>Maintenir sur le LIVE · relâcher pour arrêter</span>
+        <span>{automatic ? "Marche / arrêt sur le LIVE · Échap pour arrêter" : "Maintenir sur le LIVE · relâcher pour arrêter"}</span>
       </footer>
       <p className="hint foot-note">
         Le popup se ferme dès qu’il perd le focus (limite Chrome). Suis le compteur en direct

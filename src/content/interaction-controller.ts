@@ -11,7 +11,7 @@ export interface InteractionEnvironment {
   hasFocus(): boolean;
   isSimulationMode(): boolean;
   getTarget(): HTMLElement | null;
-  executeReal(target: HTMLElement): void;
+  executeReal(target: HTMLElement): boolean | void | Promise<boolean | void>;
   executeSimulation(): void;
   onInteraction(result: InteractionResult): void;
   onInteractingChange(interacting: boolean): void;
@@ -22,6 +22,8 @@ export class InteractionController {
   private active = false;
   private generation = 0;
   private timer: number | null = null;
+  private pending = false;
+  private lastAttemptAt = 0;
 
   constructor(
     private readonly environment: InteractionEnvironment,
@@ -31,6 +33,12 @@ export class InteractionController {
   setIntervalMs(nextMs: number): void {
     if (Number.isFinite(nextMs) && nextMs > 0) {
       this.intervalMs = Math.round(nextMs);
+      if (this.active && this.timer !== null) {
+        window.clearTimeout(this.timer);
+        this.timer = null;
+        this.lastAttemptAt = performance.now();
+        this.scheduleNext(this.generation);
+      }
     }
   }
 
@@ -39,7 +47,8 @@ export class InteractionController {
   }
 
   trigger(): boolean {
-    if (this.active) return false;
+    if (this.active || this.pending) return false;
+    this.generation += 1;
     this.active = true;
     const result = this.attempt();
     this.active = false;
@@ -47,7 +56,7 @@ export class InteractionController {
   }
 
   start(): boolean {
-    if (this.active) return false;
+    if (this.active || this.pending) return false;
 
     this.active = true;
     this.generation += 1;
@@ -73,12 +82,13 @@ export class InteractionController {
       this.timer = null;
     }
 
-    if (wasActive) {
+    if (wasActive || this.pending) {
       this.environment.onInteractingChange(false);
     }
   }
 
   private scheduleNext(generation: number): void {
+    if (this.pending || !this.active || generation !== this.generation) return;
     this.timer = window.setTimeout(() => {
       this.timer = null;
       if (!this.active || generation !== this.generation) return;
@@ -89,10 +99,11 @@ export class InteractionController {
       }
 
       this.scheduleNext(generation);
-    }, this.intervalMs);
+    }, Math.max(0, this.intervalMs - (performance.now() - this.lastAttemptAt)));
   }
 
   private attempt(): boolean {
+    this.lastAttemptAt = performance.now();
     if (
       !this.active ||
       !this.environment.isEnabled() ||
@@ -129,9 +140,41 @@ export class InteractionController {
       return false;
     }
 
-    this.environment.executeReal(target);
+    try {
+      const dispatched = this.environment.executeReal(target);
+      if (dispatched instanceof Promise) {
+        const generation = this.generation;
+        this.pending = true;
+        void dispatched.then(
+          (result) => this.completeAsync(generation, result !== false),
+          () => this.completeAsync(generation, false),
+        );
+        return true;
+      }
+      if (dispatched === false) {
+        this.environment.onError("INTERACTION_DISPATCH_FAILED");
+        return false;
+      }
+    } catch {
+      this.environment.onError("INTERACTION_DISPATCH_FAILED");
+      return false;
+    }
     this.environment.onError(null);
     this.environment.onInteraction("dispatched");
     return true;
+  }
+
+  private completeAsync(generation: number, success: boolean): void {
+    this.pending = false;
+    // A response from a stopped/reset session must not affect the next one.
+    if (generation !== this.generation) return;
+    if (!success) {
+      this.environment.onError("INTERACTION_DISPATCH_FAILED");
+      this.stop();
+      return;
+    }
+    this.environment.onError(null);
+    this.environment.onInteraction("dispatched");
+    this.scheduleNext(generation);
   }
 }

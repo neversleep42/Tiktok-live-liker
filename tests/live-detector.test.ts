@@ -55,6 +55,17 @@ describe("like target resolution", () => {
     expect(isValidInteractionTarget(button as HTMLElement)).toBe(true);
   });
 
+  it("resolves TikTok's current room chat like div inside the main LIVE root", () => {
+    document.body.innerHTML = `
+      <main id="tiktok-live-main-container-id">
+        <div data-e2e="live-room-content"><video></video></div>
+        <div data-e2e="room-chat-like-btn"></div>
+      </main>
+    `;
+    const like = document.querySelector('[data-e2e="room-chat-like-btn"]');
+    expect(resolveLikeTarget()).toEqual({ target: like, state: "READY" });
+  });
+
   it("promotes a matching icon to its interactive ancestor", () => {
     document.body.innerHTML = `
       <main data-e2e="live-room">

@@ -2,7 +2,7 @@
 
 Extension Chrome (Manifest V3) qui facilite l'envoi de likes pendant un
 TikTok LIVE regardé sur desktop : touche à maintenir, contrôle flottant,
-compteur de session et mode simulation sans action réelle.
+compteur de session, modes manuel et automatique, et simulation sans action réelle.
 
 > ⚠️ **AVERTISSEMENT IMPORTANT — RISQUE DE BANNISSEMENT**
 >
@@ -20,20 +20,25 @@ compteur de session et mode simulation sans action réelle.
    TikTok LIVE (URL `/@pseudo/live` et/ou preuve DOM `live-room` / player).
    Si la détection auto échoue, le popup propose une **activation
    manuelle** et un ciblage par **clic droit**.
-2. **Tu vises, l'extension clique** : elle suit ton curseur. Quand tu
-   maintiens la touche **L** (ou le bouton **Maintenir** du panneau
-   flottant), elle rejoue un **double-clic** là où tu vises dans le LIVE —
-   c'est le geste natif TikTok sur PC (il n'y a pas de bouton cœur sur
-   web). Les zones avatar / profil / follow sont **exclues** : on ne like
-   jamais la créatrice à la place du LIVE.
-3. **Insensible au layout** : vidéo plein écran comme grille audio
-   d'invités, la cible de repli est la racine du LIVE. Quand l'hôte change
-   la disposition, l'ancienne cible est oubliée automatiquement.
-4. **Arrêt immédiat** : relâchement de la touche/bouton, changement
+2. **Ciblage** : maintien de **L** ou du bouton **Maintenir** pour envoyer
+   un clic sur le bouton cœur du LIVE, ou un double-clic sur une zone vidéo.
+   En mode réel, le service worker utilise le protocole de débogage Chrome
+   pour produire une interaction navigateur acceptée par la page.
+   Le ciblage par clic droit accepte aussi les zones sans rôle bouton.
+   Les zones avatar / profil / follow identifiées sont exclues.
+3. **Contrôle enfant** : le bouton dédié au LIVE et la vidéo sont ciblés
+   avant leur conteneur. L'extension ne clique plus la racine générale du
+   LIVE en repli. Si aucune cible n'est trouvée, sélectionner la zone qui
+   réagit à un like manuel via **clic droit → Utiliser comme cible**.
+4. **Mode automatique** : sélectionner Automatique dans le popup ou le panneau,
+   puis cliquer **Démarrer** dans le LIVE (ou appuyer sur **L**). Les envois
+   continuent sans maintien. **Arrêter**, **L** ou **Échap** coupe la boucle.
+   Le démarrage reste explicite à chaque session.
+5. **Arrêt immédiat** : relâchement de la touche/bouton en mode manuel, changement
    d'onglet, page cachée, perte de focus, sortie du LIVE ou désactivation
    → tout s'arrête aussitôt (contrôleur de visibilité + `MutationObserver`
    sans polling agressif).
-5. **Compteur de session** : compte les envois **déclenchés**, pas les
+6. **Compteur de session** : compte les envois **déclenchés**, pas les
    likes confirmés par TikTok. Conservé en mémoire par onglet, remis à
    zéro au changement de LIVE, rechargement ou réinitialisation manuelle.
 
@@ -65,37 +70,73 @@ Charger l'extension :
    **clic droit sur la zone du LIVE → ♥ Utiliser comme cible**
    (jamais sur un avatar).
 3. Placer le curseur sur la **zone du LIVE** (pas sur une tuile invitée).
-4. **Simulation ON** (défaut) : maintenir **L** → `+1` locaux + compteur,
-   aucun like réel. **Simulation OFF** : mode réel, voir limites ci-dessous.
-5. Relâcher pour arrêter. Le panneau flottant se réduit via le chevron `˅`.
+4. Choisir **Manuel** : maintenir **L** ou le bouton, relâcher pour arrêter.
+   Le bouton **+1** déclenche une seule interaction.
+5. Choisir **Automatique** : cliquer **Démarrer** dans le panneau du LIVE,
+   puis **Arrêter** pour couper. **L** alterne marche/arrêt, **Échap** arrête.
+   Ce mode utilise la cible sélectionnée ou la zone du LIVE, sans suivre la souris.
+6. **Simulation ON** (défaut) : uniquement des `+1` locaux, aucun like réel.
+   Cliquer **Activer les likes réels** dans le panneau, ou désactiver
+   **Mode simulation** dans le popup. Changer ce réglage arrête les envois
+   mais conserve le compteur de session.
+   Changer le mode manuel/automatique arrête aussi les envois en cours.
+7. Le panneau se réduit via `˅` ; en automatique actif, **Arrêter** reste accessible.
 
-Réglage **Puissance · cadence** (Doux / Équilibré / Intense) : intervalles
-150–1000 ms entre deux envois pendant le maintien. Cadence fixe choisie
-par l'utilisateur, sans imitation de comportement humain.
+Réglage **Puissance · cadence** : intervalles de **100 à 1500 ms**, soit de
+**0,7 à 10 tentatives par seconde**, dans les deux modes. Préréglages **Doux**
+(650 ms), **Normal** (250 ms) et **Rapide** (100 ms), accessibles aussi dans le
+panneau. La cadence change pendant l’exécution sans redémarrage ni boucle
+supplémentaire. Les réglages des installations existantes sont conservés ;
+les nouvelles installations utilisent Normal en mode manuel.
+
+La cadence est un objectif d’envoi, pas un nombre de likes validés par TikTok.
+Le contrôleur attend la réponse de Chrome avant de compter l’envoi et de
+programmer le suivant. Le temps d’envoi est déduit de l’intervalle : si Chrome
+ralentit, aucun clic ne s’accumule dans une file d’attente. À l’arrêt, les envois
+non commencés sont annulés ; un clic déjà pressé est relâché proprement.
+
+### Mise à jour 0.3.1
+
+Charger le dossier `dist/` reconstruit ou extraire `release/live-like-0.3.1.zip`.
+Recharger l’extension dans `chrome://extensions`, puis les onglets TikTok.
+Vérifier **0.3.1** dans le panneau. Pour envoyer rapidement : **Activer les likes
+réels → Rapide → Automatique → Démarrer**. Le mode simulation reste explicite.
+Le maintien au bouton n’est plus interrompu par les clics produits sur le LIVE.
+La disparition de la vidéo est également détectée lorsqu’elle sert de cible.
+
+Validation locale du 8 octobre 2026 : 118 tests Vitest, vérification TypeScript
+et build Vite réussis. Extension chargée dans Chromium sur une fixture locale :
+environ 9,3 envois/s pour Rapide, maintien souris et L, arrêt Échap,
+double-clic vidéo, cible absente et popup vérifiés. Le signal de perte de focus
+est injecté dans ce test headless ; les gardes de visibilité sont aussi testées
+unitairement. Rendus inspectés à 1280 px et 390 px. Aucun lint n’est configuré.
+L’acceptation des likes sur un véritable LIVE TikTok reste à vérifier.
 
 ## Limites actuelles (à lire avant usage)
 
-- **Événements synthétiques** : l'extension rejoue des événements
-  `pointer/mouse/dblclick` avec `isTrusted === false`. TikTok peut les
-  **ignorer** ; aucun envoi n'est confirmé. Le compteur = envois
+- **Validation TikTok** : le mode réel utilise `chrome.debugger` pour envoyer
+  l'interaction au navigateur. Chrome affiche donc son avertissement de
+  débogage pendant l'exécution. TikTok peut encore dédupliquer ou limiter les
+  interactions ; le compteur = envois
   déclenchés, pas likes validés — un écart avec le compteur TikTok est
   normal (déduplication / rate-limit côté serveur).
-- **Pas de bouton cœur sur PC** : le like passe par double-clic sur la
-  zone du LIVE. Viser un avatar like la personne, pas le LIVE — d'où
-  l'exclusion des avatars et la visée curseur.
+- **Cible variable** : les contrôles du site peuvent changer. Vérifier
+  d'abord qu'un clic manuel sur la cible produit un like. Les tests locaux
+  valident la réception des événements DOM, pas leur acceptation par TikTok.
 - **Le popup se ferme** dès qu'il perd le focus (limite Chrome) : suivre
   le compteur sur le **panneau flottant** dans la page.
 - **Layouts changeants** : si l'hôte modifie la disposition, re-viser la
   zone du LIVE ; la cible périmée est oubliée automatiquement.
-- **Pas de fonctionnement autonome** : pas de likes en arrière-plan, onglet
-  inactif ou sans maintien de l'utilisateur. Pas de contournement
-  anti-bot, pas d'API TikTok privée, pas de `chrome.debugger`, pas de
-  backend ni de collecte de données (voir `PRD — TikTok LIVE Like
-  Assistant Chrome Extension.md`, §5 et §38).
+- **Automatique au premier plan** : les likes continuent sans maintien après
+  Démarrer, uniquement dans le LIVE visible et avec le focus. Changer d’onglet,
+  quitter le LIVE ou perdre le focus arrête la boucle, sans reprise automatique.
+  Pas d'API TikTok privée, pas de backend ni de collecte de données.
+  Le PRD historique décrit la première
+  version limitée au maintien ; ce README décrit les deux modes actuels.
 
 ## Vie privée
 
-Permissions minimales : `storage` (réglages locaux) et hôte
+Permissions : `storage` (réglages locaux), `debugger` (clics navigateur) et hôte
 `https://www.tiktok.com/*` (content script). `contextMenus` pour
 l'option « Utiliser comme cible ». Aucune donnée personnelle collectée,
 rien n'est envoyé à un serveur.

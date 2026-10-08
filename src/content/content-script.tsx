@@ -4,6 +4,7 @@ import { FloatingController } from "../components/FloatingController";
 import {
   DEFAULT_SETTINGS,
   DOM_LIVE_KEY,
+  LIVE_LIKE_TARGET_SELECTORS,
   SHORTCUT_CODE,
   STORAGE_KEYS,
 } from "../shared/constants";
@@ -19,6 +20,11 @@ import type {
 import floatingStyles from "./floating.css?inline";
 import { InteractionController } from "./interaction-controller";
 import {
+  requiresDoubleClick,
+  resolveLikePoint,
+  type LikePoint,
+} from "./like-dispatch";
+import {
   LiveDetector,
   findLiveScope,
   getLiveKey,
@@ -28,7 +34,6 @@ import {
   isVisibleElement,
   resolveLikeTarget,
   resolveLivePlayer,
-  resolveLiveRoomRoot,
 } from "./live-detector";
 import { SessionCounter } from "./session-counter";
 import { VisibilityController } from "./visibility-controller";
@@ -45,8 +50,9 @@ let liveSnapshot: LiveSnapshot = {
 let interacting = false;
 let error: InteractionError | null = null;
 let pulseId = 0;
-type HoldOwner = "shortcut" | "pointer" | "control";
+type HoldOwner = "shortcut" | "pointer" | "control" | "automatic";
 let holdOwner: HoldOwner | null = null;
+let holdPointerId: number | null = null;
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 let started = false;
@@ -55,8 +61,11 @@ let disposed = false;
 // Mode manuel : l'utilisateur force l'activation via popup ou clic droit.
 // Prioritaire sur l'auto-détection fragile quand TikTok change son DOM.
 let manualLive = false;
+let manualLiveUrl: string | null = null;
 let manualTarget: HTMLElement | null = null;
 let lastContextElement: Element | null = null;
+let lastContextPoint: LikePoint | null = null;
+let manualPoint: LikePoint | null = null;
 let collapsed = false;
 // Dernière position réelle du curseur : l'utilisateur vise le cœur du LIVE
 // avec sa souris, l'extension clique là où il vise tant qu'il maintient L.
@@ -69,7 +78,7 @@ let lastScope: Element | null = null;
 const counter = new SessionCounter();
 
 function isCurrentLiveContext(): boolean {
-  if (manualLive) return true;
+  if (manualLive) return manualLiveUrl === window.location.href;
   if (!liveSnapshot.liveDetected || liveSnapshot.liveKey === null) {
     return false;
   }
@@ -81,6 +90,7 @@ function isCurrentLiveContext(): boolean {
 }
 
 function coerceToInteractive(element: Element): HTMLElement | null {
+  if (element.closest("a, input, textarea, select, [contenteditable='true'], [role='textbox']")) return null;
   // Jamais un avatar / profil / follow : likerait la personne, pas le LIVE.
   if (isExcludedTarget(element)) return null;
   if (element instanceof HTMLElement && isValidInteractionTarget(element)) {
@@ -94,7 +104,9 @@ function coerceToInteractive(element: Element): HTMLElement | null {
   ) {
     return interactive;
   }
-  return null;
+  // Une zone vidéo/overlay est souvent un div sans rôle button.
+  const area = element instanceof HTMLElement ? element : element.parentElement;
+  return area && isVisibleElement(area) ? area : null;
 }
 
 function resolveCursorTarget(): HTMLElement | null {
@@ -108,6 +120,9 @@ function resolveCursorTarget(): HTMLElement | null {
     return null;
   }
   if (!hit) return null;
+  const scope = findLiveScope();
+  if (!scope || !scope.contains(hit)) return null;
+  if (hit.closest("a, input, textarea, select, [contenteditable='true'], [role='textbox'], [data-e2e*='chat'], [data-e2e*='comment']")) return null;
   // Ne jamais cliquer notre propre panneau flottant.
   if (
     (hit instanceof HTMLElement && hit.id === HOST_ID) ||
@@ -116,11 +131,13 @@ function resolveCursorTarget(): HTMLElement | null {
     return null;
   }
   const interactive = coerceToInteractive(hit);
-  if (interactive) return interactive;
-  // Repli : l'élément visé lui-même s'il est visible et hors zone avatar.
-  // Le double-clic remonte dans le DOM jusqu'au handler TikTok. Sur une
-  // tuile avatar/invité on ne retourne rien : le repli racine prendra le
-  // relais pour liker le LIVE, pas la personne.
+  if (interactive) {
+    if (interactive.matches("button, [role='button']") &&
+        !interactive.matches(LIVE_LIKE_TARGET_SELECTORS.join(", ")) &&
+        resolveLikeTarget().target !== interactive) return null;
+    return interactive;
+  }
+  // Repli : zone visible visée dans le LIVE, hors avatar/invité.
   if (isExcludedTarget(hit)) return null;
   return hit instanceof HTMLElement && isVisibleElement(hit) ? hit : null;
 }
@@ -134,6 +151,7 @@ function resolveEffectiveTarget(): HTMLElement | null {
     // endroit. Le mode manuel reste actif.
     if (manualTarget && !(scope && scope.contains(manualTarget))) {
       manualTarget = null;
+      manualPoint = null;
     }
   }
   if (
@@ -143,23 +161,17 @@ function resolveEffectiveTarget(): HTMLElement | null {
   ) {
     return manualTarget;
   }
-  if (manualTarget && !manualTarget.isConnected) {
-    manualTarget = null;
-  }
+  if (manualTarget) return null;
   // Priorité au point visé par l'utilisateur : c'est lui qui choisit
   // la zone du LIVE, pas un sélecteur deviné.
-  const aimed = resolveCursorTarget();
+  const aimed = settings.interactionMode === "manual" ? resolveCursorTarget() : null;
   if (aimed) return aimed;
-  // Repli insensible au layout : la racine du LIVE (vidéo plein écran
-  // comme grille audio d'invités). Le double-clic vise les coordonnées
-  // du curseur quand on les connaît.
-  const roomRoot = resolveLiveRoomRoot();
-  if (roomRoot) return roomRoot;
-  // Geste documenté sur PC : double-clic sur la vidéo du LIVE.
-  // Le player prime sur tout bouton générique (créatrice, commentaires).
+  const current = resolveLikeTarget();
+  if (current.state === "AMBIGUOUS") return null;
+  if (current.target?.matches(LIVE_LIKE_TARGET_SELECTORS.join(", "))) return current.target;
+  // Ne jamais cibler la racine générale : ses enfants ne recevraient pas le clic.
   const player = resolveLivePlayer();
   if (player) return player;
-  const current = resolveLikeTarget();
   if (current.state === "READY" && current.target) {
     // En mode manuel on accepte toute cible READY, même si le snapshot
     // auto n'a pas encore convergé.
@@ -230,6 +242,12 @@ function renderFloating(): void {
       error={status.error}
       pulseId={pulseId}
       collapsed={collapsed}
+      interactionMode={settings.interactionMode}
+      intervalMs={settings.holdIntervalMs}
+      onModeChange={(interactionMode) => saveFloatingSettings({ interactionMode })}
+      onIntervalChange={(holdIntervalMs) => saveFloatingSettings({ holdIntervalMs })}
+      onToggleAutomatic={toggleAutomatic}
+      onSimulationChange={(simulationMode) => saveFloatingSettings({ simulationMode })}
       onToggleCollapse={() => {
         collapsed = !collapsed;
         try {
@@ -245,8 +263,8 @@ function renderFloating(): void {
         renderFloating();
       }}
       onTrigger={() => controller.trigger()}
-      onHoldStart={(source) =>
-        beginHold(source === "pointer" ? "pointer" : "control")
+      onHoldStart={(source, pointerId) =>
+        beginHold(source === "pointer" ? "pointer" : "control", pointerId)
       }
       onHoldStop={(source) =>
         endHold(source === "pointer" ? "pointer" : "control")
@@ -307,63 +325,25 @@ const controller = new InteractionController({
   hasFocus: () => document.hasFocus(),
   isSimulationMode: () => settings.simulationMode,
   getTarget: () => resolveEffectiveTarget(),
-  // Mode réel : geste documenté TikTok PC = double-clic sur la vidéo du
-  // LIVE (il n'y a pas de bouton cœur sur web). On rejoue deux cycles
-  // pointer/souris + dblclick. Ça reste synthétique (isTrusted === false) :
-  // TikTok peut l'ignorer — limite MV3 assumée, pas de chrome.debugger
-  // ni de faux curseur (interdit PRD §5).
   executeReal: (target) => {
-    const rect = target.getBoundingClientRect();
-    // Quand on connaît le curseur, le double-clic part exactement où
-    // l'utilisateur vise dans le LIVE (indépendant du layout). Sinon,
-    // centre de la cible.
-    const aimAtCursor =
-      lastMouse !== null &&
-      lastMouse.x >= 0 &&
-      lastMouse.y >= 0 &&
-      lastMouse.x < window.innerWidth &&
-      lastMouse.y < window.innerHeight;
-    const clientX = aimAtCursor
-      ? (lastMouse as { x: number; y: number }).x
-      : rect.left + rect.width / 2;
-    const clientY = aimAtCursor
-      ? (lastMouse as { x: number; y: number }).y
-      : rect.top + rect.height / 2;
-    const base = {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      clientX,
-      clientY,
-      button: 0,
-      buttons: 1,
-      detail: 1,
-    } as const;
-    const clickCycle = (detail: number) => {
-      const init = { ...base, detail };
-      try {
-        target.dispatchEvent(
-          new PointerEvent("pointerdown", { ...init, isPrimary: true }),
-        );
-      } catch {
-        // PointerEvent indisponible : on continue avec la souris.
-      }
-      target.dispatchEvent(new MouseEvent("mousedown", init));
-      try {
-        target.dispatchEvent(
-          new PointerEvent("pointerup", { ...init, isPrimary: true }),
-        );
-      } catch {
-        // Ignore.
-      }
-      target.dispatchEvent(new MouseEvent("mouseup", init));
-      target.dispatchEvent(new MouseEvent("click", init));
+    const preferredPoint = target === manualTarget
+      ? manualPoint
+      : settings.interactionMode === "manual"
+        ? lastMouse
+        : null;
+    const point = resolveLikePoint(target, preferredPoint);
+    const message: ExtensionMessage = {
+      type: "DISPATCH_TRUSTED_LIKE",
+      x: point.x,
+      y: point.y,
+      doubleClick: requiresDoubleClick(target),
     };
-    clickCycle(1);
-    clickCycle(2);
-    target.dispatchEvent(
-      new MouseEvent("dblclick", { ...base, detail: 2 }),
-    );
+    return chrome.runtime.sendMessage(message).then((response: ExtensionResponse) => {
+      return response?.ok === true;
+    }).catch((nextError: unknown) => {
+      shutdownOnInvalidation(nextError);
+      return false;
+    });
   },
   executeSimulation: () => {
     pulseId += 1;
@@ -374,7 +354,15 @@ const controller = new InteractionController({
   },
   onInteractingChange: (next) => {
     interacting = next;
-    if (!next) holdOwner = null;
+    if (!next) {
+      holdOwner = null;
+      holdPointerId = null;
+    }
+    if (!next && isContextAlive()) {
+      void chrome.runtime.sendMessage({
+        type: "RELEASE_TRUSTED_INPUT",
+      } satisfies ExtensionMessage).catch(() => undefined);
+    }
     publishStatus();
   },
   onError: (next) => {
@@ -393,6 +381,12 @@ const visibilityController = new VisibilityController(
 
 const detector = new LiveDetector((next) => {
   const previous = liveSnapshot;
+  if (manualLive && manualLiveUrl !== window.location.href) {
+    manualLive = false;
+    manualLiveUrl = null;
+    manualTarget = null;
+    controller.stop();
+  }
   const contextChanged =
     previous.liveKey !== next.liveKey || previous.target !== next.target;
 
@@ -426,11 +420,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function beginHold(owner: HoldOwner): boolean {
+function beginHold(owner: HoldOwner, pointerId?: number): boolean {
+  if (owner !== "automatic" && settings.interactionMode !== "manual") return false;
   if (holdOwner !== null) return false;
   holdOwner = owner;
+  holdPointerId = owner === "pointer" ? pointerId ?? null : null;
   if (!controller.start()) {
     holdOwner = null;
+    holdPointerId = null;
     return false;
   }
   return true;
@@ -440,7 +437,24 @@ function endHold(owner: HoldOwner): void {
   if (holdOwner === owner) controller.stop();
 }
 
+function toggleAutomatic(): void {
+  if (settings.interactionMode !== "automatic") return;
+  if (controller.isInteracting) controller.stop();
+  else beginHold("automatic");
+}
+
+function saveFloatingSettings(patch: Partial<ExtensionSettings>): void {
+  // Stop immediately when changing mode; persist through the background queue.
+  if (patch.interactionMode) controller.stop();
+  void chrome.runtime.sendMessage({ type: "SET_SETTINGS", patch } satisfies ExtensionMessage)
+    .catch((error: unknown) => shutdownOnInvalidation(error));
+}
+
 function handleKeyDown(event: KeyboardEvent): void {
+  if (event.isTrusted && event.code === "Escape") {
+    controller.stop();
+    return;
+  }
   if (
     !event.isTrusted ||
     event.repeat ||
@@ -450,12 +464,17 @@ function handleKeyDown(event: KeyboardEvent): void {
     event.ctrlKey ||
     event.metaKey ||
     event.shiftKey ||
-    isEditableTarget(event.target)
+    event.composedPath().some((target) => isEditableTarget(target))
   ) {
     return;
   }
 
   if (!settings.enabled || !isCurrentLiveContext()) return;
+  if (settings.interactionMode === "automatic") {
+    event.preventDefault();
+    toggleAutomatic();
+    return;
+  }
   if (!beginHold("shortcut")) return;
   // En simulation on bloque pour ne pas polluer la page ; en mode réel on
   // laisse la vraie touche L (trusted) arriver jusqu'à TikTok : c'est elle
@@ -469,13 +488,16 @@ function handleKeyUp(event: KeyboardEvent): void {
   }
 }
 
-function handlePointerEnd(): void {
-  endHold("pointer");
-}
-
 function handlePointerMove(event: PointerEvent): void {
+  if (!event.isTrusted) return;
   if (typeof event.clientX === "number" && typeof event.clientY === "number") {
     lastMouse = { x: event.clientX, y: event.clientY };
+  }
+}
+
+function handlePointerEnd(event: PointerEvent): void {
+  if (holdPointerId !== null && event.pointerId === holdPointerId) {
+    endHold("pointer");
   }
 }
 
@@ -489,7 +511,7 @@ function handleStorageChange(
   const mustStop =
     !next.enabled ||
     next.simulationMode !== settings.simulationMode ||
-    next.holdIntervalMs !== settings.holdIntervalMs;
+    next.interactionMode !== settings.interactionMode;
   if (mustStop) controller.stop();
   settings = next;
   controller.setIntervalMs(next.holdIntervalMs);
@@ -500,6 +522,7 @@ function handleStorageChange(
 function handleContextMenu(event: MouseEvent): void {
   lastContextElement =
     event.target instanceof Element ? event.target : null;
+  lastContextPoint = { x: event.clientX, y: event.clientY };
 }
 
 function handleMessage(
@@ -522,6 +545,7 @@ function handleMessage(
 
   if (message.type === "FORCE_LIVE") {
     manualLive = true;
+    manualLiveUrl = window.location.href;
     error = null;
     counter.beginLive(currentSessionKey());
     publishStatus();
@@ -530,6 +554,10 @@ function handleMessage(
   }
 
   if (message.type === "USE_CONTEXT_TARGET") {
+    controller.stop();
+    manualTarget = null;
+    manualPoint = null;
+    manualLiveUrl = window.location.href;
     if (lastContextElement && isExcludedTarget(lastContextElement)) {
       // Clic droit sur un avatar / profil : on refuse pour ne pas liker
       // la personne. Vise la zone du LIVE, pas une tuile.
@@ -545,16 +573,15 @@ function handleMessage(
       : null;
     if (candidate) {
       manualTarget = candidate;
+      manualPoint = lastContextPoint;
       manualLive = true;
       error = null;
       counter.beginLive(currentSessionKey());
       publishStatus();
       sendResponse({ ok: true });
     } else {
-      // Clic droit hors cible cliquable : on active quand même le LIVE,
-      // la cible auto pourra prendre le relais.
       manualLive = true;
-      error = null;
+      error = "INTERACTION_TARGET_NOT_FOUND";
       counter.beginLive(currentSessionKey());
       publishStatus();
       sendResponse({ ok: false, error: "INVALID_TARGET" });
@@ -564,7 +591,9 @@ function handleMessage(
 
   if (message.type === "CLEAR_MANUAL") {
     manualLive = false;
+    manualLiveUrl = null;
     manualTarget = null;
+    manualPoint = null;
     controller.stop();
     publishStatus();
     sendResponse({ ok: true });

@@ -56,10 +56,27 @@ button { font: inherit; }
 }
 
 .lla-panel--collapsed {
+  display: flex;
+  align-items: center;
   width: auto;
   padding: 6px;
   border-radius: 99px;
 }
+
+.lla-options { display: flex; gap: 6px; margin-top: 12px; }
+.lla-options button, .lla-stop, .lla-cadence select {
+  border: 1px solid var(--lla-border);
+  border-radius: 7px;
+  padding: 6px;
+  background: #20232b;
+  color: var(--lla-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.lla-options button { flex: 1; }
+.lla-options button[aria-pressed="true"], .lla-stop { background: var(--lla-accent); }
+.lla-cadence { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--lla-muted); }
 
 .lla-collapsed-btn {
   display: flex;
@@ -266,6 +283,9 @@ button { font: inherit; }
 }
 
 .lla-error { color: #fcd34d; }
+.lla-simulation-notice { margin-top: 8px; padding: 8px; border: 1px solid #66501b; border-radius: 8px; background: #332a17; }
+.lla-simulation-notice .lla-simulation { margin: 0 0 6px; color: #ffe1a6; }
+.lla-enable-real { width: 100%; padding: 7px; border: 0; border-radius: 6px; background: #fff; color: #151515; cursor: pointer; font-size: 11px; font-weight: 650; }
 
 .lla-pulse {
   position: absolute;

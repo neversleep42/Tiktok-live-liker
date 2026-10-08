@@ -103,6 +103,20 @@ describe("LiveDetector observation", () => {
     );
   });
 
+  it("tracks the video fallback when it appears and disappears", async () => {
+    document.body.innerHTML = '<main data-e2e="live-room"></main>';
+    const { onChange } = startDetector();
+    const video = document.createElement("video");
+    vi.spyOn(video, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: 640, bottom: 360, width: 640, height: 360 } as DOMRect);
+    document.querySelector("main")!.append(video);
+    await flushMutationObservers();
+    vi.advanceTimersByTime(LIVE_RECHECK_DEBOUNCE_MS);
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ target: video, targetState: "READY" }));
+    video.remove();
+    await flushMutationObservers();
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ target: null, targetState: "MISSING" }));
+  });
+
   it("re-evaluates when an SPA navigation changes the LIVE URL", () => {
     document.body.innerHTML = `
       <main data-e2e="live-room">
